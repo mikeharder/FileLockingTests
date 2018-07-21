@@ -1,8 +1,10 @@
 using NUnit.Framework;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Tests
 {
@@ -172,10 +174,83 @@ namespace Tests
             }
         }
 
-        private static string CreateFile(string name)
+        [Test]
+        public void ReadWriteConcurrent()
+        {
+            var name = nameof(ReadWriteConcurrent);
+            var path = CreateFile(name, new string('a', 10));
+
+            var random = new Random();
+            var duration = TimeSpan.FromSeconds(5);
+            var sw = Stopwatch.StartNew();
+
+            var writeTask = Task.Run(() =>
+            {
+                while (sw.Elapsed < duration)
+                {
+                    // Ensure length is a multiple of 10 (verified during read)
+                    var length = random.Next(1, 1000) * 10;
+
+                    // var content = (char)('a' + random.Next(0, 25));
+                    var content = 'a';
+
+                    File.WriteAllText(path, new string(content, length));
+                }
+            });
+
+            while (sw.Elapsed < duration)
+            {
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete | FileShare.Write))
+                {
+                    var length = (int)fs.Length;
+                    var buffer = new byte[length];
+                    var bytesRead = fs.Read(buffer, 0, length);
+
+                    var message = $"length: {length}, bytesRead: {bytesRead}, fs.Length: {fs.Length}, " +
+                                  $"new FileInfo(path).Length: {new FileInfo(path).Length}";
+
+                    // bytesRead may be one of the following values:
+                    // * 0, because the file sometimes appears empty while being overwritten by the write thread
+                    // * 4096, because File.WriteAllText() splits the write into multiple WriteFile calls of size 4096
+                    // * A multiple of 10, because the length written is always a multiple of 10
+                    Assert.IsTrue(bytesRead == 0 || bytesRead == 4096 || bytesRead % 10 == 0, message);
+
+                    if (bytesRead > 0)
+                    {
+                        // Ensure all chars in string are the same (meaning we didn't read part of two different writes)
+                        var stringRead = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        Assert.AreEqual(new string(stringRead[0], bytesRead), stringRead, message);
+                    }
+                }
+            }
+
+            writeTask.Wait();
+        }
+
+        [Test]
+        public void ReadLargeFile()
+        {
+            const int size = 1_000_000;
+            var name = nameof(ReadLargeFile);
+            var path = CreateFile(name, new string('a', size));
+
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete | FileShare.Write))
+            {
+                var length = (int)fs.Length;
+                Assert.AreEqual(size, length);
+
+                var buffer = new byte[length];
+                var bytesRead = fs.Read(buffer, 0, length);
+
+                Assert.AreEqual(length, bytesRead);
+            }
+        }
+
+        private static string CreateFile(string name, string content = null)
         {
             var path = Path.Combine(AssemblySetUp.TempDir, $"{name}.txt");
-            File.WriteAllText(path, name);
+            content = string.IsNullOrEmpty(content) ? name : content;
+            File.WriteAllText(path, content);
             return path;
         }
     }
