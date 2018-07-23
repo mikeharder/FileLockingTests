@@ -112,6 +112,8 @@ namespace FileLockingTestsNative
 
                     DWORD bytesWritten = 0;
                     WriteFile(handle, str.c_str(), length, &bytesWritten, NULL);
+
+                    CloseHandle(handle);
                 }
             });
 
@@ -139,6 +141,8 @@ namespace FileLockingTestsNative
                 if (bytesRead > 0) {
                     Assert::AreEqual(string(bytesRead, 'a'), buffer);
                 }
+
+                CloseHandle(handle);
             }
 
             writeThread.join();
